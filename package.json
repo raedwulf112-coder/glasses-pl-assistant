@@ -1,0 +1,1 @@
+{"engines":{"node":">=18"},"name":"asystent-pl-backend","scripts":{"start":"node server.js"},"type":"module","version":"1.0.0"}
