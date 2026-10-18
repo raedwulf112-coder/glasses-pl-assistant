@@ -18,7 +18,22 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const WEBAPP = path.join(__dirname, "..", "webapp", "index.html");
+// Frontend: najpierw ./index.html (płaski układ repo na hostingu),
+// potem ../webapp/index.html (lokalny układ roboczy).
+const WEBAPP_CANDIDATES = [
+  path.join(__dirname, "index.html"),
+  path.join(__dirname, "..", "webapp", "index.html"),
+];
+function readWebapp() {
+  for (const p of WEBAPP_CANDIDATES) {
+    try {
+      return fs.readFileSync(p, "utf-8");
+    } catch {
+      /* próbuj dalej */
+    }
+  }
+  return null;
+}
 
 const API_URL = process.env.LLM_API_URL || "https://api.openai.com/v1/chat/completions";
 const API_KEY = process.env.LLM_API_KEY || "";
@@ -80,14 +95,13 @@ const server = http.createServer((req, res) => {
     if (req.method === "OPTIONS") return json(res, 204, {});
     if (req.url === "/api/chat" && req.method === "POST") return handleChat(req, res);
     if (req.url === "/" || req.url === "/index.html") {
-      try {
-        const html = fs.readFileSync(WEBAPP, "utf-8");
+      const html = readWebapp();
+      if (html) {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
         return res.end(html);
-      } catch {
-        res.writeHead(500);
-        return res.end("Brak pliku webapp/index.html");
       }
+      res.writeHead(500);
+      return res.end("Brak pliku index.html z aplikacją");
     }
     res.writeHead(404);
     res.end("Nie znaleziono");
