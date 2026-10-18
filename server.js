@@ -130,11 +130,12 @@ function handlePending(req, res) {
 
 const server = http.createServer((req, res) => {
   (async () => {
+    const pathname = (req.url || "/").split("?")[0];
     if (req.method === "OPTIONS") return json(res, 204, {});
-    if (req.url === "/api/chat" && req.method === "POST") return handleChat(req, res);
-    if (req.url === "/api/ask" && req.method === "POST") return handleAsk(req, res);
-    if (req.url === "/api/pending" && req.method === "GET") return handlePending(req, res);
-    if (req.url === "/" || req.url === "/index.html") {
+    if (pathname === "/api/chat" && req.method === "POST") return handleChat(req, res);
+    if (pathname === "/api/ask" && req.method === "POST") return handleAsk(req, res);
+    if (pathname === "/api/pending" && req.method === "GET") return handlePending(req, res);
+    if (pathname === "/" || pathname === "/index.html") {
       const html = readWebapp();
       if (html) {
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
