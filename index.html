@@ -51,6 +51,18 @@
     background: #2b6cb0; border: 2px solid transparent; border-radius: 14px;
     padding: 0 26px; font-size: 20px; font-weight: 600; cursor: pointer;
   }
+  /* Tryb telefonu (?mode=phone): prosty formularz wysyłania pytań na okulary */
+  #phoneWrap { display: flex; flex-direction: column; gap: 14px; padding-top: 18px; }
+  #phoneInput {
+    font-size: 22px; padding: 16px; border-radius: 14px;
+    border: 2px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08);
+    color: #fff; font-family: inherit; resize: vertical;
+  }
+  #phoneSend {
+    background: #2b6cb0; border: none; border-radius: 14px;
+    padding: 18px; font-size: 22px; font-weight: 700; color: #fff; cursor: pointer;
+  }
+  #phoneStatus { font-size: 18px; color: rgba(255,255,255,.75); min-height: 28px; text-align: center; }
   /* D-pad focus: wyraźny, widoczny pierścień */
   .focusable:focus, .focusable.focused {
     outline: none; border-color: #4da3ff !important;
@@ -97,6 +109,46 @@
    ============================================================ */
 const BACKEND_URL = "/api/chat"; // albo "https://twoj-serwer.pl/api/chat", albo ""
 
+/* Tryb telefonu: ten sam adres z ?mode=phone pokazuje prosty formularz
+   do wysyłania pytań na okulary (telefon robi za mikrofon/klawiaturę,
+   bo okulary rozpoznają tylko angielski głos). */
+const PHONE_MODE = new URLSearchParams(location.search).get("mode") === "phone";
+
+if (PHONE_MODE) { initPhoneMode(); } else { initGlassesMode(); }
+
+function initPhoneMode() {
+  document.title = "Asystent PL — telefon";
+  document.getElementById("app").innerHTML =
+    '<header><div class="dot"></div><div><h1>Asystent PL</h1>' +
+    '<div class="sub">Wprowadzanie z telefonu</div></div></header>' +
+    '<div id="phoneWrap">' +
+    '<textarea id="phoneInput" rows="4" placeholder="Napisz lub podyktuj pytanie po polsku…"></textarea>' +
+    '<button id="phoneSend">Wyślij na okulary</button>' +
+    '<div id="phoneStatus" aria-live="polite"></div>' +
+    '<div class="hint">Wskazówka: mikrofon na klawiaturze iPhone dyktuje po polsku.</div>' +
+    "</div>";
+  const input = document.getElementById("phoneInput");
+  const status = document.getElementById("phoneStatus");
+  document.getElementById("phoneSend").addEventListener("click", async () => {
+    const q = input.value.trim();
+    if (!q) return;
+    status.textContent = "Wysyłanie…";
+    try {
+      const res = await fetch("/api/ask", {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({message: q})
+      });
+      if (!res.ok) throw new Error("http " + res.status);
+      status.textContent = "Wysłano ✓ Odpowiedź pojawi się na okularach.";
+      input.value = "";
+    } catch (e) {
+      status.textContent = "Błąd wysyłania. Sprawdź połączenie i spróbuj ponownie.";
+    }
+  });
+}
+
+function initGlassesMode() {
 const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("textInput");
 
@@ -235,9 +287,21 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Enter" || e.key === " ") focusables[fi].click();
 });
 
+/* Pytania wysłane z telefonu: okulary odpytują serwer co 3 sekundy */
+async function pollPhone() {
+  try {
+    const res = await fetch("/api/pending");
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && data.message) send(data.message);
+  } catch (e) { /* brak połączenia — kolejna próba za 3 s */ }
+}
+setInterval(pollPhone, 3000);
+
 /* Powitanie */
-addMsg("Cześć! Jestem Asystent PL — prototyp polskiego asystenta na Twoje okulary. Wybierz szybkie pytanie albo napisz własne.", "bot");
+addMsg("Cześć! Jestem Asystent PL — prototyp polskiego asystenta na Twoje okulary. Wybierz szybkie pytanie, napisz własne albo wyślij je z telefonu.", "bot");
 setFocus(0);
+} // initGlassesMode
 </script>
 </body>
 </html>

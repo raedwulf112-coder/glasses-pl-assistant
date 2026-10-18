@@ -40,6 +40,10 @@ const API_KEY = process.env.LLM_API_KEY || "";
 const MODEL = process.env.LLM_MODEL || "gpt-4o-mini";
 const PORT = Number(process.env.PORT || 3000);
 
+// Pytania wysłane z telefonu (POST /api/ask); okulary odbierają je przez GET /api/pending.
+let pendingAsk = null; // { message, ts }
+const PENDING_TTL_MS = 10 * 60 * 1000; // po 10 minutach nieodebrane pytanie wygasa
+
 const SYSTEM_PL = [
   "Jesteś Asystentem PL — zwięzłym polskim asystentem na inteligentnych okularach.",
   "Odpowiadasz ZAWSZE po polsku, krótko (1–3 zdania), bo tekst widać na małym wyświetlaczu.",
@@ -54,6 +58,22 @@ function json(res, code, obj) {
     "Access-Control-Allow-Headers": "Content-Type",
   });
   res.end(JSON.stringify(obj));
+}
+
+async function readBody(req) {
+  let body = "";
+  for await (const ch of req) body += ch;
+  return body;
+}
+
+function parseMessage(body) {
+  let message = "";
+  try {
+    message = JSON.parse(body || "{}").message || "";
+  } catch {
+    /* pusty / nieprawidłowy JSON */
+  }
+  return String(message).trim().slice(0, 1000);
 }
 
 async function handleChat(req, res) {
@@ -90,10 +110,30 @@ async function handleChat(req, res) {
   return json(res, 200, { reply });
 }
 
+// Telefon wysyła pytanie, które okulary odbiorą przy następnym odpytaniu.
+async function handleAsk(req, res) {
+  const message = parseMessage(await readBody(req));
+  if (!message) return json(res, 400, { error: "Brak pytania" });
+  pendingAsk = { message, ts: Date.now() };
+  return json(res, 200, { ok: true });
+}
+
+// Okulary odpytują co kilka sekund; jedno pytanie = jedna odpowiedź.
+function handlePending(req, res) {
+  let message = null;
+  if (pendingAsk) {
+    if (Date.now() - pendingAsk.ts < PENDING_TTL_MS) message = pendingAsk.message;
+    pendingAsk = null;
+  }
+  return json(res, 200, { message });
+}
+
 const server = http.createServer((req, res) => {
   (async () => {
     if (req.method === "OPTIONS") return json(res, 204, {});
     if (req.url === "/api/chat" && req.method === "POST") return handleChat(req, res);
+    if (req.url === "/api/ask" && req.method === "POST") return handleAsk(req, res);
+    if (req.url === "/api/pending" && req.method === "GET") return handlePending(req, res);
     if (req.url === "/" || req.url === "/index.html") {
       const html = readWebapp();
       if (html) {
