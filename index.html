@@ -63,6 +63,12 @@
     padding: 18px; font-size: 22px; font-weight: 700; color: #fff; cursor: pointer;
   }
   #phoneStatus { font-size: 18px; color: rgba(255,255,255,.75); min-height: 28px; text-align: center; }
+  .speakBtn {
+    background: rgba(255,255,255,.14); border: none; border-radius: 50%;
+    width: 46px; height: 46px; font-size: 22px; cursor: pointer;
+    margin-left: 10px; flex: none;
+  }
+  .msg.bot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
   /* D-pad focus: wyraźny, widoczny pierścień */
   .focusable:focus, .focusable.focused {
     outline: none; border-color: #4da3ff !important;
@@ -88,6 +94,7 @@
     <button class="chip focusable" data-q="Jaka będzie pogoda?">Pogoda</button>
     <button class="chip focusable" data-q="Opowiedz żart">Żart</button>
     <button class="chip focusable" data-q="Pomoc">Pomoc</button>
+    <button class="chip focusable" id="autoSpeakChip">🔊 Auto: wł</button>
   </div>
 
   <div id="inputRow">
@@ -152,12 +159,52 @@ function initGlassesMode() {
 const messagesEl = document.getElementById("messages");
 const inputEl = document.getElementById("textInput");
 
-function addMsg(text, who) {
+/* --- Mowa (TTS): odtwarzanie odpowiedzi przez głośnik okularów ---
+   Platforma deklaruje obsługę "speak text aloud", więc używamy
+   standardowego Web Speech API (speechSynthesis, głos pl-PL). */
+let plVoice = null;
+const TTS_OK = "speechSynthesis" in window;
+function pickVoice() {
+  try {
+    const vs = speechSynthesis.getVoices() || [];
+    plVoice = vs.find(v => v.lang && v.lang.toLowerCase().indexOf("pl") === 0) || null;
+  } catch (e) { plVoice = null; }
+}
+if (TTS_OK) {
+  pickVoice();
+  speechSynthesis.onvoiceschanged = pickVoice;
+}
+function speak(text) {
+  if (!TTS_OK) return false;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "pl-PL";
+    if (plVoice) u.voice = plVoice;
+    speechSynthesis.speak(u);
+    return true;
+  } catch (e) { return false; }
+}
+let autoSpeak = true;
+
+function addMsg(text, who, speakable) {
   const div = document.createElement("div");
   div.className = "msg " + who;
-  div.textContent = text;
+  const span = document.createElement("span");
+  span.textContent = text;
+  div.appendChild(span);
+  if (who === "bot" && speakable && TTS_OK) {
+    const b = document.createElement("button");
+    b.className = "speakBtn focusable";
+    b.textContent = "🔊";
+    b.setAttribute("aria-label", "Odsłuchaj odpowiedź");
+    b.addEventListener("click", (ev) => { ev.stopPropagation(); speak(span.textContent); });
+    div.appendChild(b);
+  }
   messagesEl.appendChild(div);
   messagesEl.scrollTop = messagesEl.scrollHeight;
+  refreshFocusables();
+  return div;
 }
 
 /* --- Pogoda: darmowe API Open-Meteo (bez klucza), CORS włączone --- */
@@ -256,13 +303,16 @@ async function send(text) {
   if (!q) return;
   addMsg(q, "user");
   inputEl.value = "";
-  addMsg("…", "bot");
-  const typing = messagesEl.lastChild;
+  const typing = addMsg("…", "bot");
+  let answer;
   try {
-    typing.textContent = await getAnswer(q);
+    answer = await getAnswer(q);
   } catch (e) {
-    typing.textContent = "Błąd połączenia z serwerem.";
+    answer = "Błąd połączenia z serwerem.";
   }
+  typing.remove();
+  addMsg(answer, "bot", true);
+  if (autoSpeak) speak(answer);
   messagesEl.scrollTop = messagesEl.scrollHeight;
 }
 
@@ -272,9 +322,14 @@ document.querySelectorAll(".chip").forEach(ch =>
   ch.addEventListener("click", () => send(ch.dataset.q)));
 
 /* --- Nawigacja D-pad: strzałki + Enter --- */
-const focusables = Array.from(document.querySelectorAll(".focusable"));
+let focusables = [];
 let fi = 0;
+function refreshFocusables() {
+  focusables = Array.from(document.querySelectorAll(".focusable"));
+  if (fi >= focusables.length) fi = 0;
+}
 function setFocus(i) {
+  if (!focusables.length) return;
   focusables.forEach(el => el.classList.remove("focused"));
   fi = (i + focusables.length) % focusables.length;
   focusables[fi].classList.add("focused");
@@ -298,8 +353,28 @@ async function pollPhone() {
 }
 setInterval(pollPhone, 3000);
 
+/* Przełącznik auto-odtwarzania nowych odpowiedzi */
+const autoChip = document.getElementById("autoSpeakChip");
+function renderAutoChip() {
+  autoChip.textContent = "🔊 Auto: " + (autoSpeak ? "wł" : "wył");
+  autoChip.style.opacity = autoSpeak ? "1" : ".55";
+}
+if (autoChip) {
+  if (!TTS_OK) {
+    autoChip.style.display = "none";
+  } else {
+    autoChip.addEventListener("click", () => {
+      autoSpeak = !autoSpeak;
+      if (!autoSpeak && TTS_OK) speechSynthesis.cancel();
+      renderAutoChip();
+    });
+    renderAutoChip();
+  }
+}
+
 /* Powitanie */
-addMsg("Cześć! Jestem Asystent PL — prototyp polskiego asystenta na Twoje okulary. Wybierz szybkie pytanie, napisz własne albo wyślij je z telefonu.", "bot");
+addMsg("Cześć! Jestem Asystent PL — prototyp polskiego asystenta na Twoje okulary. Wybierz szybkie pytanie, napisz własne albo wyślij je z telefonu.", "bot", true);
+refreshFocusables();
 setFocus(0);
 } // initGlassesMode
 </script>
