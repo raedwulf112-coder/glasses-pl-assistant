@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=600, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Lista zakupów</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #000; color: #fff;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    overflow: hidden;
+  }
+  #app {
+    width: 100%; max-width: 600px; height: 100%; max-height: 600px;
+    margin: 0 auto; display: flex; flex-direction: column;
+    padding: 20px 24px 24px;
+  }
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding-bottom: 14px; border-bottom: 1px solid rgba(255,255,255,.18);
+  }
+  .dot { width: 14px; height: 14px; border-radius: 50%; background: #35c759; box-shadow: 0 0 12px #35c759; }
+  h1 { font-size: 30px; font-weight: 600; letter-spacing: .5px; }
+  .sub { font-size: 17px; color: rgba(255,255,255,.6); margin-top: 2px; }
+  #count { margin-left: auto; font-size: 19px; color: rgba(255,255,255,.7); white-space: nowrap; }
+  #list {
+    flex: 1; overflow-y: auto; padding: 14px 2px;
+    display: flex; flex-direction: column; gap: 10px;
+  }
+  .row {
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(255,255,255,.07); border: 2px solid transparent;
+    border-radius: 16px; padding: 14px 16px; cursor: pointer;
+  }
+  .box {
+    flex: none; width: 34px; height: 34px; border-radius: 10px;
+    border: 3px solid rgba(255,255,255,.5);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; color: #fff;
+  }
+  .row.done .box { background: #35c759; border-color: #35c759; }
+  .label { flex: 1; font-size: 22px; line-height: 1.3; word-break: break-word; }
+  .row.done .label { text-decoration: line-through; color: rgba(255,255,255,.45); }
+  .del {
+    flex: none; background: rgba(255,80,80,.18); color: #ff8a8a;
+    border: none; border-radius: 12px; width: 46px; height: 46px;
+    font-size: 24px; cursor: pointer; display: none;
+  }
+  .phone .del { display: block; }
+  .empty {
+    text-align: center; color: rgba(255,255,255,.45); font-size: 20px;
+    padding: 40px 20px;
+  }
+  footer { padding-top: 12px; border-top: 1px solid rgba(255,255,255,.18); }
+  #clearBtn {
+    width: 100%; background: rgba(255,255,255,.08); color: #fff;
+    border: 2px solid transparent; border-radius: 14px;
+    padding: 13px; font-size: 18px; cursor: pointer;
+  }
+  #clearBtn:disabled { opacity: .35; cursor: default; }
+  /* --- tryb telefonu --- */
+  #addRow { display: flex; gap: 10px; padding: 14px 0 6px; }
+  #addInput {
+    flex: 1; background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.25);
+    border-radius: 14px; padding: 15px 16px; font-size: 21px; color: #fff;
+    font-family: inherit; outline: none;
+  }
+  #addBtn {
+    background: #35c759; border: none; border-radius: 14px;
+    padding: 0 24px; font-size: 30px; font-weight: 700; color: #fff; cursor: pointer;
+  }
+  #status { font-size: 17px; color: rgba(255,255,255,.65); min-height: 26px; text-align: center; padding-top: 8px; }
+  /* D-pad focus: wyraźny, widoczny pierścień */
+  .focusable:focus, .focusable.focused {
+    outline: none; border-color: #35c759 !important;
+    box-shadow: 0 0 0 3px rgba(53,199,89,.55);
+  }
+  .hint { font-size: 15px; color: rgba(255,255,255,.45); text-align: center; padding-top: 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="dot"></div>
+    <div>
+      <h1>Lista zakupów</h1>
+      <div class="sub" id="subLine">🛒 wspólny koszyk</div>
+    </div>
+    <div id="count"></div>
+  </header>
+
+  <div id="addZone"></div>
+  <div id="list" aria-live="polite"></div>
+
+  <footer>
+    <button id="clearBtn" class="focusable">🧹 Usuń odhaczone</button>
+    <div id="status" aria-live="polite"></div>
+    <div class="hint" id="hintLine">D-pad: strzałki = nawigacja, Enter = odhacz</div>
+  </footer>
+</div>
+
+<script>
+"use strict";
+/* ============================================================
+   Lista zakupów — web aplikacja na Meta Ray-Ban Display.
+   Jeden wspólny list na serwerze (backend/server.js):
+     GET  /api/list
+     POST /api/list/add        {text}
+     POST /api/list/toggle     {id}
+     POST /api/list/delete     {id}
+     POST /api/list/clear-done
+   Tryb okularów (domyślny): przeglądanie + odhaczanie.
+   Tryb telefonu (?mode=phone): dodawanie, odhaczanie, usuwanie.
+   ============================================================ */
+const PHONE_MODE = new URLSearchParams(location.search).get("mode") === "phone";
+if (PHONE_MODE) {
+  document.body.classList.add("phone");
+  document.getElementById("subLine").textContent = "📱 dodawanie z telefonu";
+  document.getElementById("hintLine").textContent = "Stuknij pozycję, żeby odhaczyć.";
+  document.getElementById("addZone").innerHTML =
+    '<div id="addRow">' +
+    '<input id="addInput" class="focusable" type="text" placeholder="Dodaj produkt…" autocomplete="off" enterkeyhint="go">' +
+    '<button id="addBtn" class="focusable" aria-label="Dodaj">+</button>' +
+    "</div>";
+  const addInput = document.getElementById("addInput");
+  async function addItem() {
+    const text = addInput.value.trim();
+    if (!text) return;
+    try {
+      const res = await fetch("/api/list/add", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({ text })
+      });
+      if (!res.ok) throw new Error("http " + res.status);
+      const data = await res.json();
+      addInput.value = "";
+      render(data.items);
+      setStatus("");
+      refreshFocusables();
+    } catch (e) {
+      setStatus("Nie udało się dodać. Sprawdź połączenie.");
+    }
+  }
+  document.getElementById("addBtn").addEventListener("click", addItem);
+  addInput.addEventListener("keydown", (e) => { if (e.key === "Enter") addItem(); });
+}
+
+const listEl = document.getElementById("list");
+const countEl = document.getElementById("count");
+const clearBtn = document.getElementById("clearBtn");
+
+function setStatus(t) { document.getElementById("status").textContent = t || ""; }
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function render(items) {
+  items = items || [];
+  const todo = items.filter(i => !i.done);
+  countEl.textContent = todo.length ? todo.length + " do kupienia" : "";
+  clearBtn.disabled = !items.some(i => i.done);
+
+  if (!items.length) {
+    listEl.innerHTML = '<div class="empty">Lista pusta 🙂<br>Telefonem dodaj pierwsze produkty.</div>';
+    refreshFocusables();
+    return;
+  }
+  listEl.innerHTML = items.map((it) =>
+    '<div class="row focusable' + (it.done ? " done" : "") + '" data-id="' + it.id +
+      '" role="checkbox" aria-checked="' + it.done + '" tabindex="0">' +
+      '<div class="box">' + (it.done ? "✓" : "") + "</div>" +
+      '<div class="label">' + escapeHtml(it.text) + "</div>" +
+      (PHONE_MODE ? '<button class="del focusable" data-del="' + it.id + '" aria-label="Usuń">✕</button>' : "") +
+    "</div>"
+  ).join("");
+
+  listEl.querySelectorAll(".row").forEach((row) => {
+    row.addEventListener("click", (e) => {
+      if (e.target.closest(".del")) return;
+      toggle(Number(row.dataset.id));
+    });
+    row.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(Number(row.dataset.id)); }
+    });
+  });
+  if (PHONE_MODE) {
+    listEl.querySelectorAll(".del").forEach((btn) => {
+      btn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        del(Number(btn.dataset.del));
+      });
+    });
+  }
+  refreshFocusables();
+}
+
+async function toggle(id) {
+  try {
+    const res = await fetch("/api/list/toggle", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ id })
+    });
+    if (!res.ok) throw new Error("http " + res.status);
+    render((await res.json()).items);
+  } catch (e) { setStatus("Brak połączenia z serwerem."); }
+}
+
+async function del(id) {
+  try {
+    const res = await fetch("/api/list/delete", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({ id })
+    });
+    if (!res.ok) throw new Error("http " + res.status);
+    render((await res.json()).items);
+    setStatus("");
+  } catch (e) { setStatus("Brak połączenia z serwerem."); }
+}
+
+clearBtn.addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/list/clear-done", { method: "POST" });
+    if (!res.ok) throw new Error("http " + res.status);
+    const data = await res.json();
+    render(data.items);
+    setStatus(data.removed ? "Usunięto " + data.removed + " odhaczonych." : "");
+  } catch (e) { setStatus("Brak połączenia z serwerem."); }
+});
+
+/* --- Nawigacja D-pad (okulary) --- */
+let focusables = [];
+let fi = 0;
+function refreshFocusables() {
+  focusables = Array.from(document.querySelectorAll(".focusable"));
+  if (fi >= focusables.length) fi = 0;
+}
+function setFocus(i) {
+  if (!focusables.length) return;
+  focusables.forEach((el) => el.classList.remove("focused"));
+  fi = (i + focusables.length) % focusables.length;
+  focusables[fi].classList.add("focused");
+  focusables[fi].focus({ preventScroll: true });
+}
+document.addEventListener("keydown", (e) => {
+  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight","Enter"," "].includes(e.key)) e.preventDefault();
+  if (e.key === "ArrowDown" || e.key === "ArrowRight") setFocus(fi + 1);
+  else if (e.key === "ArrowUp" || e.key === "ArrowLeft") setFocus(fi - 1);
+  else if (e.key === "Enter" || e.key === " ") focusables[fi].click();
+});
+
+/* Odświeżanie co 3 sekundy — lista jest wspólna dla telefonu i okularów */
+async function poll() {
+  try {
+    const res = await fetch("/api/list");
+    if (!res.ok) return;
+    render((await res.json()).items);
+  } catch (e) { /* spróbuj za 3 s */ }
+}
+poll();
+setInterval(poll, 3000);
+</script>
+</body>
+</html>
